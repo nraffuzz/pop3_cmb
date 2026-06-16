@@ -1,0 +1,11 @@
+# .gitignore
+__pycache__/
+*.py[cod]
+*.so
+pop3_cmb.egg-info/
+dist/
+build/
+.ipynb_checkpoints/
+*.npz
+# Optional: ignore data files if they are very large
+# data/*.txt
