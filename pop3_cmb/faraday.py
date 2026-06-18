@@ -39,7 +39,7 @@ class FaradayModel:
         Delta_c = 18*np.pi**2 + 82*d - 39*d**2          # Bryan & Norman fit
         # mu = 0.6
         M_thr = 3.5e7 / self.h * (Tvir/1e4)**1.5 \
-            * (self.Om/Om_z * Delta_c/(18*np.pi**2))**(-1) \
+            * (self.Om/Om_z * Delta_c/(18*np.pi**2))**(-0.5) \
             * ((1+z)/10.0)**(-1.5)
         return M_thr # M_sun
         
