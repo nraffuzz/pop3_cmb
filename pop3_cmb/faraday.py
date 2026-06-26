@@ -137,11 +137,11 @@ class FaradayModel:
             V_rem_phys  = (4*np.pi/3) * (rs_phys_Mpc**3 - rp_phys_Mpc**3)   # proper Mpc^3
 
             u_sn = get_SN_profile_k(self.k, rs_phys_Mpc, self.p['eta'])  # dimensionless
-            alpha_tilde_phys = self.alpha0[i] * V_rem_phys * u_sn / (2*np.pi)**3  # proper Mpc^2
+            alpha_tilde_phys = self.alpha0[i] * V_rem_phys * u_sn # proper Mpc^2
             z = self.z_arr[i]
             alpha_tilde = alpha_tilde_phys * (1 + z)**2          # -> comoving Mpc^2
 
-            M_thr = self._M_thr(self.z_arr[i])
+            M_thr = self._M_thr(z)
             mask  = self.M_grid >= M_thr
             
             bracket_1 = np.zeros_like(self.k) # Mpc⁻³
