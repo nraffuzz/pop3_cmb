@@ -44,7 +44,7 @@ class VVSpectrum:
                 P_vals[mask] = np.exp(log_p)
             
             integrand = P_vals / r_val**2
-            Cl[i] = np.trapz(integrand, x=r_val)
+            Cl[i] = np.trapezoid(integrand, x=r_val)
         return Cl
 
     def compute_Cl_VV(self):
@@ -60,7 +60,7 @@ class VVSpectrum:
 
         output_ells = np.unique(np.logspace(np.log10(self.ells[0]), np.log10(self.ells[-1]), 25).astype(int))
         l_sum_max = self.ells[-1]
-        l_sum = np.arange(2, l_sum_max)
+        l_sum = np.arange(2, l_sum_max + 1)
         Cl_alpha = self.compute_Cl_alpha_limber(l_sum)
         
         Cl_EE_full = np.zeros(l_sum_max)
@@ -69,10 +69,10 @@ class VVSpectrum:
         Cl_EE_cut = Cl_EE_full[l_sum]
 
         Cl_VV = np.zeros_like(output_ells, dtype=float)
-        
+        valid_indices = np.where(Cl_alpha != 0)[0]
+
         for i, L in enumerate(output_ells):
             val = 0.0
-            valid_indices = np.where(Cl_alpha != 0)[0]
             for idx1 in valid_indices:
                 l1 = l_sum[idx1]
                 l2_min = max(2, abs(L - l1))
