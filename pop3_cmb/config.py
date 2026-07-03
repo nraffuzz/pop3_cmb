@@ -34,7 +34,7 @@ COSMOLOGY = {
 
 # --- Model Parameters ---
 PARAMS = {
-    'ell_max': 500,
+    'ell_max': 3000, # incrased
     # Redshift range for integration
     'z_min': 5,
     'z_max': 30,
