@@ -60,7 +60,7 @@ class VVSpectrum:
 
         output_ells = np.unique(np.logspace(np.log10(self.ells[0]), np.log10(self.ells[-1]), 25).astype(int))
         l_sum_max = self.ells[-1]
-        l_sum = np.arange(2, l_sum_max + 1)
+        l_sum = np.arange(2, l_sum_max)
         Cl_alpha = self.compute_Cl_alpha_limber(l_sum)
         
         Cl_EE_full = np.zeros(l_sum_max)
