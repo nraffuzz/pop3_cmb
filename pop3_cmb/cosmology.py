@@ -54,7 +54,7 @@ class CAMBRunner:
         results = camb.get_results(self.pars)
         return results.comoving_radial_distance(z_array)
 
-    def get_primordial_Cl_EE(self, lmax=2000):
+    def get_primordial_Cl_EE(self, lmax=3000):
         """Computes primordial C_l^EE.
         Rather than computing the (radially) comoving E-mode power spectrum (later to be converter through limber approximation), 
         we directly compute the primordial C_l^EE from CAMB.
