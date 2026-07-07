@@ -1,7 +1,7 @@
-from .cosmology import CAMBRunner
-from .faraday import FaradayModel
-from .spectrum import VVSpectrum
-from .config import PARAMS, CONSTANTS, COSMOLOGY
+from .cosmology_JAX import CAMBRunner
+from .faraday_JAX import FaradayModel
+from .spectrum_JAX import VVSpectrum
+from .config_JAX import PARAMS, CONSTANTS, COSMOLOGY
 
 # Define what is available when running 'from pop3_cmb import *'
 __all__ = [

@@ -3,7 +3,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 from jax.numpy import trapezoid
 from functools import partial
-from .profiles import get_SN_profile_k, get_halo_profile_k
+from .profiles_JAX import get_SN_profile_k, get_halo_profile_k
 
 
 # outsource the math with JIT helper functions
@@ -21,15 +21,8 @@ def _M_thr_JIT(z, Om, h):
 
 @jax.jit
 def init_halo_properties_JIT(k, Plin, z_arr, M_grid, h, Om, rho_crit0_ref, A, a, p):
-    nz = len(z_arr)
-    nM = len(M_grid)
 
     rho_m_0 = rho_crit0_ref * h**2 * Om
-
-    dndM = jnp.zeros((nz, len(M_grid)))
-    bias = jnp.zeros((nz, len(M_grid)))
-    Rvir = jnp.zeros((nz, len(M_grid)))
-    
     delta_c = 1.686
     R_L = (3 * M_grid / (4 * jnp.pi * rho_m_0))**(1/3) # Lagrangian radius
     # R_L is defined at the mean matter density today and is comoving,
@@ -39,34 +32,30 @@ def init_halo_properties_JIT(k, Plin, z_arr, M_grid, h, Om, rho_crit0_ref, A, a,
     OmL = 1.0 - Om                              # flat LCDM
     Delta_c = 18 * jnp.pi**2                          # ~178
     
-    for i in range(nz):
-        z = z_arr[i]
+    # z_arr (,nZ)
+    # Plin (nz,nK)
+    sig2 = jnp.zeros_like(M_grid) # (,nM)
 
-        P_z = Plin[i, :]
-        sig2 = jnp.zeros_like(M_grid)
-        for j in range(nM):
-            R = R_L[j]
+    x = R_L[:, None] * k[None, :] # (nM, nK)
+    W = 3 * (jnp.sin(x) - x*jnp.cos(x)) / (x**3) # (nM, nK)
+    integrand = k[None, None, :]**2 * Plin[None, :, :] * W[:, None, :]**2 # (nM, nZ, nK)
+    sig2 = trapezoid(integrand, x=k, axis = 2) / (2 * jnp.pi**2) # (nM, nZ)
 
-            x = k * R
-            W = 3 * (jnp.sin(x) - x*jnp.cos(x)) / (x**3)
-            integrand = k**2 * P_z * W**2
-            sig2 = sig2.at[j].set(trapezoid(integrand, x=k) / (2 * jnp.pi**2))
-        
-        sigma_z = jnp.sqrt(sig2)
-        nu = (delta_c / sigma_z)**2
-        nu_prime = a * nu
-        f_nu = A * jnp.sqrt(2*nu_prime/jnp.pi) * (1 + nu_prime**(-p)) *jnp.exp(-nu_prime/2)
-        
-        dlnsigma_dlnM = jnp.gradient(jnp.log(sigma_z), jnp.log(M_grid))
-        dndM = dndM.at[i, :].set((rho_m_0 / M_grid) * f_nu * jnp.abs(dlnsigma_dlnM)) # dn/dlnM (units Mpc⁻³)
-        bias = bias.at[i, :].set(1 + (nu_prime - 1)/delta_c + (2*p/delta_c)/(1 + nu_prime**p))
-        # self.Rvir[i, :] = R_L
-        
-        Ez2 = Om * (1 + z)**3 + OmL
-        rho_crit_z = rho_crit0 * Ez2                          # physical M_sun/Mpc^3 at z
-        Rvir_phys = (3 * M_grid / (4 * jnp.pi * Delta_c * rho_crit_z))**(1/3)
-        Rvir = Rvir.at[i, :].set(Rvir_phys * (1 + z))                 # convert to comoving
-    return dndM, bias, Rvir
+    sigma = jnp.sqrt(sig2) # (nM, nZ)
+    nu = (delta_c / sigma)**2 # (nM, nZ)
+    nu_prime = a * nu # (nM, nZ)
+    f_nu = A * jnp.sqrt(2*nu_prime/jnp.pi) * (1 + nu_prime**(-p)) *jnp.exp(-nu_prime/2) # (nM, nZ)
+
+    dlnsigma_dlnM = jnp.gradient(jnp.log(sigma), jnp.log(M_grid), axis = 0) # axis does gradient along mass 
+    dndM = (rho_m_0 / M_grid[:, None]) * f_nu * jnp.abs(dlnsigma_dlnM) # dn/dlnM (units Mpc⁻³)
+    bias = 1 + (nu_prime - 1)/delta_c + (2*p/delta_c)/(1 + nu_prime**p)
+
+    E2 = Om * (1 + z_arr)**3 + OmL # (,nZ)
+    rho_crit = rho_crit0 * E2                # physical M_sun/Mpc^3 
+    Rvir_phys = (3 * M_grid[:, None] / (4 * jnp.pi * Delta_c * rho_crit[None, :]))**(1/3) # (nM, nZ)
+    Rvir = Rvir_phys * (1 + z_arr)[None, :]                # convert to comoving
+
+    return dndM.T, bias.T, Rvir.T # A: Accidently broadcasted backwards 
 
 @jax.jit
 def alpha0_JIT(
@@ -116,47 +105,36 @@ def _init_popIII_properties_JIT(Ob, Om, epsilon_star, M_grid, M_sn_max, M_sn_min
         N_sn = jnp.tile(N_sn_val, (nz, 1))
         return N_sn
 
-# @partial(jax.jit, static_argnames=["nz"])
-def compute_P_alpha_JIT(nz, E_sn, E_sn_ref, ombh2_ref, z_arr, t_age, t_age_ref, eta, k, alpha0, M_grid, Rvir, dndM ,N_sn, bias, Plin, Om, h):
+@jax.jit
+def compute_P_alpha_JIT(E_sn, E_sn_ref, ombh2_ref, z_arr, t_age, t_age_ref, eta, k, alpha0, M_grid, Rvir, dndM ,N_sn, bias, Plin, Om, h):
 
-    P1h = jnp.zeros((nz, len(k)))
-    P2h = jnp.zeros((nz, len(k)))
     dM  = jnp.gradient(jnp.log(M_grid))
 
-    for i in range(nz):
 
-        z = z_arr[i]
-        rs_phys_pc = 2.0 * (E_sn/E_sn_ref)**(1/5) \
-            * (ombh2_ref/0.0245)**(-1/5) \
-            * ((1 + z)/20.0)**(-3/5) \
-            * (t_age/t_age_ref)**(2/5)
+    rs_phys_pc = 2.0 * (E_sn/E_sn_ref)**(1/5) \
+        * (ombh2_ref/0.0245)**(-1/5) \
+        * ((1 + z_arr)/20.0)**(-3/5) \
+        * (t_age/t_age_ref)**(2/5) # (,nZ)
 
-        rs_phys_Mpc = rs_phys_pc * 1e-6
-        rp_phys_Mpc = rs_phys_Mpc * (eta/(eta-1))**(-1/3)
-        V_rem_phys  = (4*jnp.pi/3) * (rs_phys_Mpc**3 - rp_phys_Mpc**3)   # proper Mpc^3
+    rs_phys_Mpc = rs_phys_pc * 1e-6 # (,nZ)
+    rp_phys_Mpc = rs_phys_Mpc * (eta/(eta-1))**(-1/3) # (,nZ)
+    V_rem_phys  = (4*jnp.pi/3) * (rs_phys_Mpc**3 - rp_phys_Mpc**3)   # proper Mpc^3 # (,nZ)
 
-        u_sn = get_SN_profile_k(k, rs_phys_Mpc, eta)  # dimensionless
-        alpha_tilde_phys = alpha0[i] * V_rem_phys * u_sn # proper Mpc^2
-        
-        alpha_tilde = alpha_tilde_phys * (1 + z)**2          # -> comoving Mpc^2
+    u_sn = get_SN_profile_k(k, rs_phys_Mpc, eta)  # dimensionless # (nZ, nK)
+    alpha_tilde_phys = alpha0[:, None] * V_rem_phys[:, None] * u_sn # proper Mpc^2 (nZ, nK)
 
-        M_thr = _M_thr_JIT(z, Om, h)
-        mask  = M_grid >= M_thr
-        
-        bracket_1 = jnp.zeros_like(k) # Mpc⁻³
-        bracket_2 = jnp.zeros_like(k) # Mpc⁻³
-        
-        for j in range(len(M_grid)):
-            active = mask[j].astype(k.dtype)                  # skip sub-threshold halos
+    alpha_tilde = alpha_tilde_phys * (1 + z_arr)[:, None]**2          # -> comoving Mpc^2
 
-            u_halo = get_halo_profile_k(k, Rvir[i,j], 10.0)
-            bracket_1 = bracket_1 + active * dndM[i,j] * (
-                N_sn[i,j] + N_sn[i,j]*(N_sn[i,j]-1)*u_halo**2
-                ) * dM[j]
-            bracket_2 = bracket_2 + active * dndM[i,j] * bias[i,j] * N_sn[i,j] * dM[j]
+    M_thr = _M_thr_JIT(z_arr, Om, h) # (,nZ)
+    mask  = M_grid[None, :] >= M_thr[:, None] # (nZ, nM)
 
-        P1h = P1h.at[i, :].set(alpha_tilde**2 * bracket_1) # alpha_tilde² · bracket_1 = Mpc⁴ · Mpc⁻³ = Mpc
-        P2h = P2h.at[i, :].set(alpha_tilde**2 * Plin[i, :] * bracket_2**2) # alpha_tilde² · Plin · bracket_2² = Mpc⁴ · Mpc³ · Mpc⁻⁶ = Mpc
+    active = mask.astype(k.dtype)[:, :, None] # (1, nM, 1)
+    u_halo = get_halo_profile_k(k, Rvir, 10.0) # (nZ, nM, nK)
+    bracket_1 = jnp.sum(active * dndM[:, :, None] * ( N_sn[:, :, None] + N_sn[:, :, None]*(N_sn[:, :, None]-1)*u_halo**2 ) * dM[None, :, None], axis = 1) # sum over masses
+    bracket_2 = jnp.sum(active * dndM[:, :, None] * bias[:, :, None] * N_sn[:, :, None] * dM[None, :, None], axis = 1)
+
+    P1h = alpha_tilde**2 * bracket_1
+    P2h = alpha_tilde**2 * Plin * bracket_2**2
 
     return P1h, P2h
 
@@ -217,7 +195,6 @@ class FaradayModel:
             self.c["Mpc_to_pc"],
         )
             
-
     def _init_popIII_properties(self):
         """
         Compute Pop III star formation properties: number of SNe per halo N_sn and Faraday Conversion rate alpha0 on the grid defined by z_arr and M_grid.
@@ -232,7 +209,7 @@ class FaradayModel:
         Compute Faraday Conv. power spectrum P_alpha(k, z) using the halo model.
         Returns P1h + P2h on the (z_arr, k) grid.
         """
-        P1h, P2h = compute_P_alpha_JIT(self.nz, self.p['E_sn'], self.c['E_sn_ref'], self.c['ombh2_ref'], self.z_arr, self.p['t_age'], self.c['t_age_ref'], self.p['eta'], self.k, self.alpha0, self.M_grid, self.Rvir, self.dndM, self.N_sn, self.bias, self.Plin, self.Om, self.h)
+        P1h, P2h = compute_P_alpha_JIT(self.p['E_sn'], self.c['E_sn_ref'], self.c['ombh2_ref'], self.z_arr, self.p['t_age'], self.c['t_age_ref'], self.p['eta'], self.k, self.alpha0, self.M_grid, self.Rvir, self.dndM, self.N_sn, self.bias, self.Plin, self.Om, self.h)
 
         if return_components == True: 
             return P1h, P2h
