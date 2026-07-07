@@ -2,6 +2,7 @@ import time
 import numpy as np
 from scipy.interpolate import RectBivariateSpline
 import spherical
+from .wignerCache import WignerKernelCache
 
 class VVSpectrum:
     def __init__(self, ell_min, ell_max, P_alpha, z_arr, r_arr, k_arr, Cl_EE):
@@ -70,56 +71,12 @@ class VVSpectrum:
         Cl_EE_cut = Cl_EE_full[l_sum]
 
         Cl_VV = np.zeros_like(output_ells, dtype=float)
-
-        valid_indices = np.where(Cl_alpha != 0)[0] # A: moved outside L loop 
-
-        # timing constants
-        t_wigner_total = 0.0
-        t_sum_total = 0.0
-        n_wigner_calls = 0
-
-        wigner_calc = spherical.Wigner3jCalculator(int(output_ells.max()),int(l_sum.max()))
-
+        cache = WignerKernelCache('pop3_cmb/wigner_cache_ellmax3000/')
         for i, L in enumerate(output_ells):
-            t_L = time.time()
-
-            val = 0.0
-            for idx1 in valid_indices:
-                l1 = l_sum[idx1]
-                l2_min = max(2, abs(L - l1))
-                l2_max = min(l_sum_max - 1, L + l1)
-                if l2_min > l2_max:
-                    continue
-                
-                idx2_start = l2_min - 2
-                idx2_end = l2_max - 2 + 1
-                
-                l2_vals = l_sum[idx2_start:idx2_end]
-                ee_vals = Cl_EE_cut[idx2_start:idx2_end]
-
-                # Wigner symbol calculation timing 
-                t_w = time.time()
-
-                w3j_all = wigner_calc.calculate(int(L),int(l1),2,0) 
-                w3j_vals = w3j_all[l2_vals] 
-
-                valid_w3j = ~np.isnan(w3j_vals)
-
-                t_wigner_total += time.time() - t_w
-                n_wigner_calls += 1
-                
-                if np.any(valid_w3j):
-                    weight = (2*l1 + 1) * (2*l2_vals[valid_w3j] + 1) / (4 * np.pi)
-                    val += np.sum(Cl_alpha[idx1] * ee_vals[valid_w3j] * weight * w3j_vals[valid_w3j]**2)
+            K = cache.get_kernel_for_L_index(i)
+            val = Cl_alpha @ K @ Cl_EE_cut
 
             Cl_VV[i] = val
             print(f"  Processed ell={L}")
-
-        total_time = time.time() - t0
-        minutes, seconds = divmod(total_time, 60)
-
-        print(f"Total Wigner3j time: {t_wigner_total:.2f}s")
-        print(f"Total Wigner3j calls: {n_wigner_calls}")
-        print(f"Convolution done in {int(minutes)}m {seconds:.2f}s")
 
         return output_ells, Cl_VV
