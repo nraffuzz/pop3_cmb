@@ -3,7 +3,7 @@ from scipy.integrate import simpson
 from .profiles import get_SN_profile_k, get_halo_profile_k
 
 class FaradayModel:
-    def __init__(self, camb_runner, params, constants, k_grid, Plin_grid, Model = 'LarsonIMF'):
+    def __init__(self, camb_runner, params, constants, k_grid, Plin_grid, Model = 'FlatIMF', M_min = 10, M_max = 300):
         """_summary_
 
         Args:
@@ -19,6 +19,8 @@ class FaradayModel:
         self.p = params
         self.c = constants
         self.IMF = Model
+        self.M_min = M_min
+        self.M_max = M_max
         
         self.h = self.cr.h
         self.Om = self.cr.pars.omegam
@@ -110,14 +112,12 @@ class FaradayModel:
         M_sn_max, M_sn_min = self.p['M_sn_max'], self.p['M_sn_min']
         
         if self.IMF == 'FlatIMF':
-            M_max, M_min = 100.0, 10.0
-            A_imf = M_star / (M_max - M_min)
+            A_imf = M_star / (self.M_max - self.M_min)
             N_sn_val = A_imf * np.log(M_sn_max / M_sn_min)
 
         if self.IMF == 'LarsonIMF': # see http://arxiv.org/abs/1610.05777 (Bennassuti)
             M_points = 500 # hard coded for now
-            M_max, M_min = 300.0, 10.0
-            starM_grid = np.linspace(M_min,M_max, M_points)
+            starM_grid = np.linspace(self.M_min,self.M_max, M_points)
 
             a = -1.35
             LarsonIMF = starM_grid**(a - 1)*np.exp(-20/starM_grid)
