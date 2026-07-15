@@ -42,7 +42,7 @@ PARAMS = {
     # Wavenumber grid [1/Mpc]
     'k_min': 1e-4,
     'k_max': 1e3,
-    'n_k_points': 500,
+    'n_k_points': 200,
 
     # Halo Mass Function (Sheth-Tormen)
     'st_a': 0.75,

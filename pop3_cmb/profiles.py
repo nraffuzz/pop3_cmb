@@ -32,7 +32,7 @@ def get_halo_profile_k(k, Rvir, c_vir=10.):
     c_vir ≤ 4 for soft halos (very sparse), c_vir ≥ 15 for compact halos (tightly packed around the center)
     """
     rs = Rvir / c_vir
-    n_r = 500 # hard coded number of radial points for integration, can be changed (accuracy/speed tradeoff)
+    n_r = 200 # hard coded number of radial points for integration, can be changed (accuracy/speed tradeoff)
     x = np.logspace(-4, 0, n_r)
     r = x * Rvir
     y = r / rs
