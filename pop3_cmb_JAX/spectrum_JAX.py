@@ -67,7 +67,7 @@ class VVSpectrum:
         """        
         return compute_Cl_alpha_limber_JIT(l_list, self.r, self.k, self.z, self.P_alpha)
 
-    def compute_Cl_VV(self):
+    def compute_Cl_VV(self, WignerCachePath = 'pop3_cmb_JAX/wigner_cache_ellmax3000/'):
         """
         Compute Cl_VV by convolving Cl_alpha and Cl_EE with Wigner 3j symbols:
         Equation 11 of https://arxiv.org/abs/1401.1371
@@ -87,7 +87,7 @@ class VVSpectrum:
 
 
         Cl_alpha = self.compute_Cl_alpha_limber(l_sum)
-        cache = WignerKernelCache('pop3_cmb_JAX/wigner_cache_ellmax3000/')
+        cache = WignerKernelCache(WignerCachePath)
         K = cache.get_kernel_for_L_index(output_ells)
         
         return output_ells, compute_Cl_VV_JIT(K, Cl_alpha, Cl_EE_cut)

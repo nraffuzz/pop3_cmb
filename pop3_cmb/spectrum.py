@@ -47,7 +47,7 @@ class VVSpectrum:
             Cl[i] = np.trapezoid(integrand, x=r_val)
         return Cl
 
-    def compute_Cl_VV(self):
+    def compute_Cl_VV(self, WignerCachePath = 'pop3_cmb/wigner_cache_ellmax3000'):
         """
         Compute Cl_VV by convolving Cl_alpha and Cl_EE with Wigner 3j symbols:
         Equation 11 of https://arxiv.org/abs/1401.1371
@@ -70,7 +70,7 @@ class VVSpectrum:
         Cl_EE_cut = Cl_EE_full[l_sum]
 
         Cl_VV = np.zeros_like(output_ells, dtype=float)
-        cache = WignerKernelCache('pop3_cmb/wigner_cache_ellmax3000/')
+        cache = WignerKernelCache(WignerCachePath)
         for i, L in enumerate(output_ells):
             K = cache.get_kernel_for_L_index(i)
             val = Cl_alpha @ K @ Cl_EE_cut
