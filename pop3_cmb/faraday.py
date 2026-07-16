@@ -3,7 +3,7 @@ from scipy.integrate import simpson
 from .profiles import get_SN_profile_k, get_halo_profile_k
 
 class FaradayModel:
-    def __init__(self, camb_runner, params, constants, k_grid, Plin_grid, Model = 'FlatIMF', M_min = 10, M_max = 300):
+    def __init__(self, camb_runner, params, constants, k_grid, Plin_grid, freq = 1 * 10**9, Model = 'FlatIMF', M_min = 10, M_max = 100):
         """_summary_
 
         Args:
@@ -17,6 +17,7 @@ class FaradayModel:
         self.Plin = Plin_grid
         self.cr = camb_runner
         self.p = params
+        self.p['nu_Hz'] = freq
         self.c = constants
         self.IMF = Model
         self.M_min = M_min
