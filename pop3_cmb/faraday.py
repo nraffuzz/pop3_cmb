@@ -1,9 +1,16 @@
 import numpy as np
 from scipy.integrate import simpson
 from .profiles import get_SN_profile_k, get_halo_profile_k
+from .starIMF import IMF
+from typing import Optional
 
 class FaradayModel:
-    def __init__(self, camb_runner, params, constants, k_grid, Plin_grid, freq = 1 * 10**9, Model = 'FlatIMF', M_min = 10, M_max = 100):
+    def __init__(self, camb_runner, params, constants, k_grid, Plin_grid, freq = 1 * 10**9, Model = 'FlatIMF', M_low = 10, M_high = 100,
+                 gamma: Optional[float] = None, 
+                 alpha: Optional[float] = None,
+                 beta: Optional[float] = None,
+                 Mch: Optional[float] = None,
+                 sigma: Optional[float] = None):
         """_summary_
 
         Args:
@@ -12,6 +19,23 @@ class FaradayModel:
             constants (dict): constants used for scaling relations and reference values (see config.py)
             k_grid (1D np.ndarray): wavenumber grid
             Plin_grid (2D np.ndarray): linear power spectrum on the grid defined by k_grid and z_grid
+            freq (<type>): frequency of observation for generated spectra  
+
+ 
+            model (string): IMF model
+            - PowerIMF : power law IMF with free gamma param
+            - FlatIMF : power law IMF with gamma = 0 
+            - LogNormalIMF : Log normal IMF with Mch and sigma as free param
+            - ChabrierIMF: Chabrier IMF with free alpha and beta param
+            - LarsonIMF: Chabrier IMF with alpha = -2.35 and beta = 1
+
+            M_star (1D np.ndarray): amount of stellar mass in halo of a range of masses
+            M_sn_max (float): maximum stellar mass for CCSN
+            M_sn_min (float): minimum stellar mass for CCSN 
+            M_low (float): minimum stellar mass of population 
+            M_high (float): maximum stellar mass of population 
+
+            Note: Gamma, Sigma, and Mch is defined positive. M_low and M_high must include [10-40]
         """
         self.k = k_grid
         self.Plin = Plin_grid
@@ -19,9 +43,15 @@ class FaradayModel:
         self.p = params
         self.p['nu_Hz'] = freq
         self.c = constants
+
         self.IMF = Model
-        self.M_min = M_min
-        self.M_max = M_max
+        self.M_low = M_low
+        self.M_high = M_high
+        self.gamma = gamma
+        self.alpha = alpha
+        self.beta = beta
+        self.Mch = Mch
+        self.sigma = sigma
         
         self.h = self.cr.h
         self.Om = self.cr.pars.omegam
@@ -112,20 +142,7 @@ class FaradayModel:
         M_star = self.p['epsilon_star'] * f_b * self.M_grid
         M_sn_max, M_sn_min = self.p['M_sn_max'], self.p['M_sn_min']
         
-        if self.IMF == 'FlatIMF':
-            A_imf = M_star / (self.M_max - self.M_min)
-            N_sn_val = A_imf * np.log(M_sn_max / M_sn_min)
-
-        if self.IMF == 'LarsonIMF': # see http://arxiv.org/abs/1610.05777 (Bennassuti)
-            M_points = 500 # hard coded for now
-            starM_grid = np.linspace(self.M_min,self.M_max, M_points)
-
-            a = -1.35
-            LarsonIMF = starM_grid**(a - 1)*np.exp(-20/starM_grid)
-            integrand = LarsonIMF * starM_grid
-
-            A_larson = M_star / simpson(integrand, x = starM_grid)
-            N_sn_val = A_larson * simpson(LarsonIMF, x = starM_grid)
+        N_sn_val = IMF(self.IMF, M_star, M_sn_max, M_sn_min, self.M_low, self.M_high, self.gamma, self.alpha, self.beta, self.Mch, self.sigma)
 
         self.N_sn = np.tile(N_sn_val, (self.nz, 1))
 

@@ -6,10 +6,10 @@ from pop3_cmb.spectrum import VVSpectrum
 import matplotlib.pyplot as plt
 from time import time
 
-# plt.rcParams['mathtext.fontset'] = 'stix'
-# plt.rcParams['font.family'] = 'STIXGeneral'
-# plt.rcParams['font.size'] = 16
-# plt.rcParams['figure.figsize'] = (10, 6)
+plt.rcParams['mathtext.fontset'] = 'stix'
+plt.rcParams['font.family'] = 'STIXGeneral'
+plt.rcParams['font.size'] = 16
+plt.rcParams['figure.figsize'] = (10, 6)
 
 def main():
     camb_start = time()
@@ -20,7 +20,13 @@ def main():
     camb_end = time()
     
     fd_start = time()
-    fm = FaradayModel(camb_run, PARAMS, CONSTANTS, k_grid, Plin)
+    # test FlatIMF
+    fm = FaradayModel(camb_run, PARAMS, CONSTANTS, k_grid, Plin, 
+                    freq = 27 * 10 ** 9,
+                    Model = 'FlatIMF',
+                    M_low = 10, 
+                    M_high= 100)
+    
     P_alpha = fm.compute_P_alpha()
     fd_end = time()
     
@@ -37,14 +43,15 @@ def main():
     fname = f"Cl_VV_ellmax{int(PARAMS['ell_max'])}_{nu_str}GHz_RemnAge{age_str}Myr.npz"
     np.savez(fname, ls=ls, Cl_VV=Cl_VV)
 
-    # plt.plot(ls, ls*(ls+1)*Cl_VV/(2*np.pi), 'o-', color='crimson', lw=2,) #label=r'Pop III Signal'
-    # plt.xscale('log')
-    # plt.yscale('log')
-    # plt.xlabel(r'Multipole $\ell$')
-    # plt.ylabel(r'$\ell(\ell+1)\ C_\ell^{VV}\ /\ 2\pi$ [$\mu K^2$]')
-    # plt.title(r'Circular Polarization Power Spectrum from Pop III SNe')
-    # plt.grid(True, which='major', alpha=0.5)
-    
+    plt.plot(ls, ls*(ls+1)*Cl_VV/(2*np.pi), 'o-', color='crimson', lw=2,) #label=r'Pop III Signal'
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.xlabel(r'Multipole $\ell$')
+    plt.ylabel(r'$\ell(\ell+1)\ C_\ell^{VV}\ /\ 2\pi$ [$\mu K^2$]')
+    plt.title(r'Circular Polarization Power Spectrum from Pop III SNe')
+    plt.grid(True, which='major', alpha=0.5)
+    plt.show() 
+
     print(f'Cosmology: {camb_end-camb_start} Faraday: {fd_end-fd_start} Spectrum: {spectrum_end-spectrum_start}')
 
 if __name__ == "__main__":
