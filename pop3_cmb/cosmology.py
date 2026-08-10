@@ -35,14 +35,14 @@ class CAMBRunner:
         # Set matter power calculation
         self.pars.set_matter_power(redshifts=list(self.z_grid), kmax=self.k_max)
         self.h = self.pars.h
+        self.results = camb.get_results(self.pars)
 
     def get_linear_matter_power(self):
         """Returns z_grid, k_grid [1/Mpc], and P_lin [Mpc^3]."""
         self.pars.NonLinear = model.NonLinear_none
-        results = camb.get_results(self.pars)
         
         # CAMB uses k/h; convert to 1/Mpc.
-        kh, z, pk = results.get_matter_power_spectrum(
+        kh, z, pk = self.results.get_matter_power_spectrum(
             minkh=self.k_min / self.h, 
             maxkh=self.k_max / self.h, 
             npoints=self.n_k
@@ -51,8 +51,7 @@ class CAMBRunner:
         return np.array(z), k_Mpc, pk
 
     def get_comoving_distance(self, z_array):
-        results = camb.get_results(self.pars)
-        return results.comoving_radial_distance(z_array)
+        return self.results.comoving_radial_distance(z_array)
 
     def get_primordial_Cl_EE(self, lmax=3000):
         """Computes primordial C_l^EE.
@@ -60,8 +59,7 @@ class CAMBRunner:
         we directly compute the primordial C_l^EE from CAMB.
         """
         self.pars.set_for_lmax(lmax, lens_potential_accuracy=0)
-        results = camb.get_results(self.pars)
-        powers = results.get_cmb_power_spectra(self.pars, CMB_unit='muK', lmax=lmax)
+        powers = self.results.get_cmb_power_spectra(self.pars, CMB_unit='muK', lmax=lmax)
         
         Dl_EE = powers['total'][:, 1]
         ls = np.arange(Dl_EE.shape[0])
