@@ -2,15 +2,21 @@ import numpy as np
 from scipy.integrate import simpson
 from .profiles import get_SN_profile_k, get_halo_profile_k
 from .starIMF import IMF
+from .reionization import Reionization
 from typing import Optional
 
 class FaradayModel:
     def __init__(self, camb_runner, params, constants, k_grid, Plin_grid, freq = 1 * 10**9, Model = 'FlatIMF', M_low = 10, M_high = 100,
+                 correction = False,
+                 nuisance: Optional[dict] = None,
                  gamma: Optional[float] = None, 
                  alpha: Optional[float] = None,
                  beta: Optional[float] = None,
                  Mch: Optional[float] = None,
-                 sigma: Optional[float] = None):
+                 sigma: Optional[float] = None,
+                 z_re: Optional[float] = None,           
+                 Delta_z: Optional[float] = None):
+
         """_summary_
 
         Args:
@@ -34,7 +40,9 @@ class FaradayModel:
             M_sn_min (float): minimum stellar mass for CCSN 
             M_low (float): minimum stellar mass of population 
             M_high (float): maximum stellar mass of population 
-
+            Correction (bool): include parameter correction
+            Nuisance (dict): Dictionary specifying 'A' and 'B' values 
+            
             Note: Gamma, Sigma, and Mch is defined positive. M_low and M_high must include [10-40]
         """
         self.k = k_grid
@@ -52,6 +60,10 @@ class FaradayModel:
         self.beta = beta
         self.Mch = Mch
         self.sigma = sigma
+
+        self.z_re = z_re
+        self.Delta_z = Delta_z
+        self.nuisance = nuisance if nuisance is not None else {}
         
         self.h = self.cr.h
         self.Om = self.cr.pars.omegam
@@ -61,10 +73,25 @@ class FaradayModel:
         
         self.M_grid = np.logspace(np.log10(self.p['M_halo_min']), np.log10(self.p['M_halo_max']), self.p['n_M_points'])
         self.rho_m_0 = self.c['rho_crit0_ref'] * self.h**2 * self.Om 
-        
+
+        if correction:
+            if ('A' not in self.nuisance or 'B' not in self.nuisance or self.z_re is None or self.Delta_z is None):
+                raise ValueError(
+                    "correction=True requires nuisance['A'], nuisance['B'], "
+                    "z_re, and Delta_z."
+                    )
+
+            self.reion = Reionization(
+                self.cr,
+                self.p,
+                self.nuisance,
+                self.z_re,
+                self.Delta_z
+            )
+
         self._init_halo_properties()
-        self._init_popIII_properties()
-    
+        self._init_popIII_properties(correction)
+
     def _M_thr(self, z):
         """Eq. (25): threshold halo mass for T_vir = 1e4 K atomic cooling."""
         Tvir = 1.0e4
@@ -133,7 +160,7 @@ class FaradayModel:
         self.alpha0 = alpha0_pc * self.c['Mpc_to_pc']                 # [Mpc^-1], ×1e6
         
 
-    def _init_popIII_properties(self):
+    def _init_popIII_properties(self, correction):
         """
         Compute Pop III star formation properties: number of SNe per halo N_sn and Faraday Conversion rate alpha0 on the grid defined by z_arr and M_grid.
         Uses simple scaling relations based on the parameters and constants provided, but can be replaced with more detailed models if desired.
@@ -143,8 +170,13 @@ class FaradayModel:
         M_sn_max, M_sn_min = self.p['M_sn_max'], self.p['M_sn_min']
         
         N_sn_val = IMF(self.IMF, M_star, M_sn_max, M_sn_min, self.M_low, self.M_high, self.gamma, self.alpha, self.beta, self.Mch, self.sigma)
-
         self.N_sn = np.tile(N_sn_val, (self.nz, 1))
+
+        if correction:
+            if self.nuisance == {} or self.z_re == None or self.Delta_z == None: 
+                raise(ValueError)
+            cor = self.reion.N_SN_cor_factor()
+            self.N_sn = self.N_sn * cor[:, None]
 
         self._alpha0()
     

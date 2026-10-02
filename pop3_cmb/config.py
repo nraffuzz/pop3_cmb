@@ -64,4 +64,12 @@ PARAMS = {
     'n_M_points': 100,     # Mass integration steps
     'M_halo_min': 1e5,     # [M_sun] Grid min
     'M_halo_max': 1e10,    # [M_sun] Grid max
+
+    # Reionization Correction to N_SN
+    'f_He': 0.081,         # number fraction of primordial Helium 
+    'x_0': 2e-4,           # Initial Hydrogen ionization fraction 
+    'z_re_He': 3.5,        # Redshift Q = 0.5 for Helium reionization
+    'delta_z_He' : 0.5,    # Physical redshift duration of Helium reionizatoin (Q = 0.1 to Q = 0.9)
+    'sigma_T': 6.65e-29,   # Thomspson scattering crossection 
+    'n_H_0': 0.19,         # Number denisty of protons z = 0 
 }
