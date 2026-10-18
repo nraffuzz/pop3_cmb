@@ -4,6 +4,8 @@ from .profiles import get_SN_profile_k, get_halo_profile_k
 from .starIMF import IMF
 from .reionization import Reionization
 from typing import Optional
+from scipy.integrate import solve_ivp
+from scipy.interpolate import PchipInterpolator, CubicSpline
 
 class FaradayModel:
     def __init__(self, camb_runner, params, constants, k_grid, Plin_grid, freq = 1 * 10**9, Model = 'FlatIMF', M_low = 10, M_high = 100,
@@ -48,7 +50,7 @@ class FaradayModel:
         self.k = k_grid
         self.Plin = Plin_grid
         self.cr = camb_runner
-        self.p = params
+        self.p = params.copy()
         self.p['nu_Hz'] = freq
         self.c = constants
 
@@ -73,6 +75,13 @@ class FaradayModel:
         
         self.M_grid = np.logspace(np.log10(self.p['M_halo_min']), np.log10(self.p['M_halo_max']), self.p['n_M_points'])
         self.rho_m_0 = self.c['rho_crit0_ref'] * self.h**2 * self.Om 
+
+        self.z_time = np.linspace(0, 100, 10001)
+
+        self.t_grid = self.cr.results.physical_time(self.z_time)
+        self.t_of_z = PchipInterpolator(self.z_time, self.t_grid)
+        self.z_of_t = PchipInterpolator(self.t_grid[::-1], self.z_time[::-1])
+        self.t_active_yr = 10**7
 
         if correction:
             if ('A' not in self.nuisance or 'B' not in self.nuisance or self.z_re is None or self.Delta_z is None):
@@ -103,6 +112,22 @@ class FaradayModel:
             * (self.Om/Om_z * Delta_c/(18*np.pi**2))**(-0.5) \
             * ((1+z)/10.0)**(-1.5)
         return M_thr # M_sun
+    
+    def tau_star(self, m):
+        """
+        # Pop III stellar lifetime fit from Schaerer (2002), Table 6, for zero-metallicity stars:
+        # log10(tau_*/yr) = 9.785 - 3.759 x + 1.413 x^2 - 0.186 x^3,
+        # where x = log10(m/M_sun). Valid for approximately 5-500 M_sun.
+        """
+
+        x = np.log10(m)
+        log_tau_yr = (
+            9.785
+            - 3.759*x
+            + 1.413*x**2
+            - 0.186*x**3
+        )
+        return 10**log_tau_yr / 1e9  # Gyr
         
     def _init_halo_properties(self):
         """
@@ -112,6 +137,7 @@ class FaradayModel:
         self.dndM = np.zeros((self.nz, len(self.M_grid)))
         self.bias = np.zeros((self.nz, len(self.M_grid)))
         self.Rvir = np.zeros((self.nz, len(self.M_grid)))
+        self.sig2 = np.zeros((self.nz, len(self.M_grid)))  # not needed
         
         delta_c = 1.686
         R_L = (3 * self.M_grid / (4 * np.pi * self.rho_m_0))**(1/3) # Lagrangian radius
@@ -129,8 +155,9 @@ class FaradayModel:
                 x = self.k * R
                 W = 3 * (np.sin(x) - x*np.cos(x)) / (x**3)
                 integrand = self.k**2 * P_z * W**2
-                sig2[j] = simpson(integrand, x=self.k) / (2 * np.pi**2)
-            
+                sig2[j] = simpson(integrand, x=self.k) / (2 * np.pi**2) # Halo mass varience on (M,z)
+            self.sig2[i, :] = sig2
+
             sigma_z = np.sqrt(sig2)
             nu = (delta_c / sigma_z)**2
             A, a, p = self.p['st_A'], self.p['st_a'], self.p['st_p']
@@ -147,7 +174,87 @@ class FaradayModel:
             Rvir_phys = (3 * self.M_grid / (4 * np.pi * Delta_c * rho_crit_z))**(1/3)
             self.Rvir[i, :] = Rvir_phys * (1 + z)                 # convert to comoving
 
-        
+        P_z0 = self.cr.PK.P(0.0, self.k)
+        self.S0 = np.zeros_like(self.M_grid)
+
+        for j, R in enumerate(R_L):
+            x = self.k * R
+            W = 3 * (np.sin(x) - x*np.cos(x)) / x**3
+            integrand = self.k**2 * P_z0 * W**2
+
+            self.S0[j] = simpson(
+                integrand,
+                x=self.k
+            ) / (2 * np.pi**2)
+
+        self.EPS()
+
+    def EPS(self, q = 2.2):
+        delta_c = 1.686
+        S_interp = PchipInterpolator(np.log(self.M_grid), np.log(self.S0), extrapolate=True) # NOTE: this extrapolates for the lowest mass grid values; can be fixed if needed
+
+        k_ref = 0.05
+        ik = np.argmin(np.abs(self.k - k_ref))
+
+        P0 = self.cr.PK.P(0.0, self.k[ik])  
+        P_growth = self.cr.PK.P(self.z_time, self.k[ik])
+     
+        D_grid = np.sqrt(P_growth / P0)
+        D_interp = CubicSpline(self.z_time, D_grid) # need derivative thats why we use CubicSpline
+
+        def dMdz(z, M):
+            S_M = np.exp(S_interp(np.log(M)))
+            S_Mq = np.exp(S_interp(np.log(M / q)))
+            D = D_interp(z)
+
+            dD_dz = D_interp(z, 1) # first derivative
+
+            return (np.sqrt(2 / np.pi) * M / np.sqrt(S_Mq - S_M) * delta_c/ D**2 * dD_dz)
+
+        self.EPS_solutions = []
+
+        tau_max = self.tau_star(self.p['M_sn_min'])      # Gyr
+        t_active_Gyr = self.t_active_yr / 1e9               # Gyr
+
+        for z_obs in self.z_arr:
+
+            t_obs = self.t_of_z(z_obs)
+
+            z_needed = self.z_of_t(
+                t_obs - tau_max - t_active_Gyr
+            )
+
+            sol = solve_ivp(
+                dMdz,
+                (z_obs, z_needed),
+                self.M_grid,
+                dense_output=True,
+                rtol=1e-8,
+                atol=1e-3
+            )
+
+            self.EPS_solutions.append(sol)
+
+    def _Mh_active_bracket(self, i, m, t_active_yr): # i is redshift index; m is star mass
+        """
+        Suppression factor for all halo masses in self.M_grid for a given observation redshift and stellar mass.
+        """
+
+        dynamicalGamma_Gyr = t_active_yr / 1e9
+        tau = self.tau_star(m)
+
+        z_obs = self.z_arr[i]
+        t_obs = self.t_of_z(z_obs)
+        z_recent = self.z_of_t(t_obs - tau)
+        z_early  = self.z_of_t(t_obs - tau - dynamicalGamma_Gyr)
+
+        sol = self.EPS_solutions[i] # solution for halo grid observed at z_obs
+
+        M_recent = sol.sol(z_recent) # arrays over M grid
+        M_early  = sol.sol(z_early)
+
+        return M_recent - M_early
+
     def _alpha0(self): # Mpc⁻¹
         t_ratio  = self.p['t_age'] / self.c['t_age_ref']      # /1e6 yr
         E_ratio  = self.p['E_sn']  / self.c['E_sn_ref']       # /1e53 erg  -- SEE 4c
@@ -166,11 +273,12 @@ class FaradayModel:
         Uses simple scaling relations based on the parameters and constants provided, but can be replaced with more detailed models if desired.
         """
         f_b = self.Ob / self.Om
-        M_star = self.p['epsilon_star'] * f_b * self.M_grid
         M_sn_max, M_sn_min = self.p['M_sn_max'], self.p['M_sn_min']
-        
-        N_sn_val = IMF(self.IMF, M_star, M_sn_max, M_sn_min, self.M_low, self.M_high, self.gamma, self.alpha, self.beta, self.Mch, self.sigma)
-        self.N_sn = np.tile(N_sn_val, (self.nz, 1))
+
+        self.N_sn = np.zeros((self.nz, len(self.M_grid)))
+
+        for i in range(self.nz):
+            self.N_sn[i,:] = IMF(self.IMF, lambda m: self._Mh_active_bracket(i, m, self.t_active_yr), self.p['epsilon_star'], f_b, M_sn_max, M_sn_min, self.M_low, self.M_high, self.gamma, self.alpha, self.beta, self.Mch, self.sigma)
 
         if correction:
             if self.nuisance == {} or self.z_re == None or self.Delta_z == None: 
@@ -191,18 +299,18 @@ class FaradayModel:
         
 
         for i in range(self.nz):
+            z = self.z_arr[i]
             rs_phys_pc = 2.0 * (self.p['E_sn']/self.c['E_sn_ref'])**(1/5) \
                 * (self.c['ombh2_ref']/0.0245)**(-1/5) \
-                * ((1 + self.z_arr[i])/20.0)**(-3/5) \
+                * ((1 + z)/20.0)**(-3/5) \
                 * (self.p['t_age']/self.c['t_age_ref'])**(2/5)
 
             rs_phys_Mpc = rs_phys_pc * 1e-6
             rp_phys_Mpc = rs_phys_Mpc * (self.p['eta']/(self.p['eta']-1))**(-1/3)
             V_rem_phys  = (4*np.pi/3) * (rs_phys_Mpc**3 - rp_phys_Mpc**3)   # proper Mpc^3
 
-            u_sn = get_SN_profile_k(self.k, rs_phys_Mpc, self.p['eta'])  # dimensionless
+            u_sn = get_SN_profile_k(self.k * (1 + z), rs_phys_Mpc, self.p['eta'])  # dimensionless (converted k back to physical)
             alpha_tilde_phys = self.alpha0[i] * V_rem_phys * u_sn # proper Mpc^2
-            z = self.z_arr[i]
             alpha_tilde = alpha_tilde_phys * (1 + z)**2          # -> comoving Mpc^2
 
             M_thr = self._M_thr(z)

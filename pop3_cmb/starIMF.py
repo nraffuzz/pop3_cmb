@@ -2,7 +2,7 @@ import numpy as np
 from typing import Optional 
 from scipy.integrate import trapezoid
 
-def IMF(model, M_star, M_sn_max, M_sn_min, M_low, M_high, 
+def IMF(model, M_bracket_func, epsilon_star, f_b, M_sn_max, M_sn_min, M_low, M_high, 
         gamma: Optional[float] = None,
         alpha: Optional[float] = None, 
         beta: Optional[float] = None,
@@ -19,7 +19,9 @@ def IMF(model, M_star, M_sn_max, M_sn_min, M_low, M_high,
         - ChabrierIMF : Chabrier IMF with free alpha and beta param
         - LarsonIMF : Chabrier IMF with alpha = -2.35 and beta = 1
 
-        M_star (np.arry) : amount of stellar mass in halo of a range of masses
+        M_bracket_func : function returning Delta M_h(m) over the halo mass grid
+        epsilon_star   : star formation efficiency
+        f_b            : baryon fraction        
         M_sn_max (float) : maximum stellar mass for CCSN
         M_sn_min (float) : minimum stellar mass for CCSN 
         M_low (float) : minimum stellar mass of population 
@@ -64,11 +66,13 @@ def IMF(model, M_star, M_sn_max, M_sn_min, M_low, M_high,
             raise ValueError("ChabrierIMF requires alpha beta and Mch")
         phi = starM_grid ** - alpha * np.exp(-(Mch/starM_grid) ** beta)
 
-    A_IMF = M_star / trapezoid(starM_grid * phi, x = starM_grid)
+    A_IMF = 1 / trapezoid(starM_grid * phi, x = starM_grid)
     max_idx = np.argmin(np.abs(starM_grid - M_sn_max)) 
     min_idx = np.argmin(np.abs(starM_grid - M_sn_min))
     starM_grid_sn = starM_grid[min_idx:max_idx + 1]
     phi_conf = phi[min_idx:max_idx + 1]
-    N_sn_val = A_IMF * trapezoid(phi_conf, x = starM_grid_sn)
-
+    M_bracket = np.array([M_bracket_func(m) for m in starM_grid_sn])
+    integrand = phi_conf[:, None] * M_bracket
+    N_sn_val = (epsilon_star * f_b * A_IMF * trapezoid(integrand, x=starM_grid_sn, axis=0)
+)
     return N_sn_val

@@ -36,7 +36,15 @@ class CAMBRunner:
         self.pars.set_matter_power(redshifts=list(self.z_grid), kmax=self.k_max)
         self.h = self.pars.h
         self.results = camb.get_results(self.pars)
-
+        self.PK = camb.get_matter_power_interpolator(
+            self.pars,
+            nonlinear=False,
+            hubble_units=False,
+            k_hunit=False,
+            kmax=self.k_max,
+            zmin=0.0,
+            zmax=100
+        )
     def get_linear_matter_power(self):
         """Returns z_grid, k_grid [1/Mpc], and P_lin [Mpc^3]."""
         self.pars.NonLinear = model.NonLinear_none
@@ -48,7 +56,9 @@ class CAMBRunner:
             npoints=self.n_k
         )
         k_Mpc = kh * self.h
-        return np.array(z), k_Mpc, pk
+        pk_Mpc3 = pk / self.h**3
+
+        return np.array(z), k_Mpc, pk_Mpc3
 
     def get_comoving_distance(self, z_array):
         return self.results.comoving_radial_distance(z_array)

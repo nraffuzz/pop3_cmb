@@ -18,11 +18,15 @@ def main():
     r_grid = camb_run.get_comoving_distance(z_grid)
     ls_ee, Cl_EE = camb_run.get_primordial_Cl_EE(lmax=3000)
     camb_end = time()
-    
+
+    z_min = z_grid[0]
+    z_max = z_grid[-1]
+
     fd_start = time()
     # test FlatIMF
+    frequency = 500 * 10 ** 6
     fm = FaradayModel(camb_run, PARAMS, CONSTANTS, k_grid, Plin, 
-                    freq = 27 * 10 ** 9,
+                    frequency,
                     Model = 'FlatIMF',
                     M_low = 10, 
                     M_high= 100)
@@ -48,7 +52,7 @@ def main():
     plt.yscale('log')
     plt.xlabel(r'Multipole $\ell$')
     plt.ylabel(r'$\ell(\ell+1)\ C_\ell^{VV}\ /\ 2\pi$ [$\mu K^2$]')
-    plt.title(r'Circular Polarization Power Spectrum from Pop III SNe')
+    plt.title(f'Circular Polarization Power Spectrum from Pop III SNe\nFrequency = {frequency / 1e6:g} MHz, Z_range = ({z_min},{z_max})')    
     plt.grid(True, which='major', alpha=0.5)
     plt.show() 
 
