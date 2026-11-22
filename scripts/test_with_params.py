@@ -14,7 +14,7 @@ plt.rcParams['figure.figsize'] = (10, 6)
 
 
 def main():
-    correction = False 
+    correction = True # must be true otherwise error for this test
 
     nuisance = {
         'A': 1.0,
@@ -22,7 +22,7 @@ def main():
     }
 
     z_re = 8.0
-    Delta_z = 7.0
+    Delta_z = 7
 
     camb_run = CAMBRunner(COSMOLOGY, PARAMS['k_min'], PARAMS['k_max'], PARAMS['n_k_points'], PARAMS['z_min'], PARAMS['z_max'])
 
@@ -47,11 +47,10 @@ def main():
         correction=correction,
         nuisance=nuisance,
         z_re=z_re,
-        Delta_z=Delta_z
-    )
+        Delta_z = Delta_z
+        )
 
     P_alpha = fm.compute_P_alpha()
-
     if correction: 
         tau = fm.reion.tau()
 
@@ -70,20 +69,19 @@ def main():
         f"RemnAge{age_str}Myr_"
         f"A{nuisance['A']}_"
         f"B{nuisance['B']}_"
-        f"zre{z_re}_"
-        f"Dz{Delta_z}.npz"
+        f"zre{z_re}__"
+        f"DeltaZ{Delta_z}.npz"
     )
 
-    # np.savez(
-    #     fname,
-    #     ls=ls,
-    #     Cl_VV=Cl_VV,
-    #     tau=tau,
-    #     A=nuisance['A'],
-    #     B=nuisance['B'],
-    #     z_re=z_re,
-    #     Delta_z=Delta_z,
-    #     delta_z=fm.reion.delta_z)
+    np.savez(
+        fname,
+        ls=ls,
+        Cl_VV=Cl_VV,
+        tau=tau,
+        A=nuisance['A'],
+        B=nuisance['B'],
+        z_re=z_re,
+        Delta_z=Delta_z)
 
     plt.plot(ls, ls * (ls + 1) * Cl_VV / (2 * np.pi), 'o-', color='crimson', lw=2)
 
@@ -93,11 +91,11 @@ def main():
     plt.xlabel(r'Multipole $\ell$')
     plt.ylabel(r'$\ell(\ell+1)C_\ell^{VV}/2\pi$ [$\mu K^2$]')
     plt.title(f'{z_grid[-1]},{z_grid[0]}')
-    # plt.title(
-    #     rf'$A={nuisance["A"]},\ B={nuisance["B"]},'
-    #     rf'\ z_{{re}}={z_re},\ \Delta z={Delta_z},'
-    #     rf'\ \tau={tau:.4f}$'
-    # )
+    plt.title(
+        rf'$A={nuisance["A"]},\ B={nuisance["B"]},'
+        rf'\ z_{{re}}={z_re},\ \Delta z={Delta_z:.4f},'
+        rf'\ \tau={tau:.4f}$'
+    )
 
     plt.grid(True, which='major', alpha=0.5) 
     print(z_grid)
