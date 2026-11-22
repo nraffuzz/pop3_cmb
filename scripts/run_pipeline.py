@@ -40,11 +40,9 @@ def main():
     spectrum_end = time()
     
     nu_GHz = PARAMS['nu_Hz'] / 1e9
-    age_Myr = PARAMS['t_age'] / 1e6
     # %g drops trailing zeros; replace '.' so it's filename-safe
     nu_str  = f"{nu_GHz:g}".replace('.', 'p')
-    age_str = f"{age_Myr:g}".replace('.', 'p')
-    fname = f"Cl_VV_ellmax{int(PARAMS['ell_max'])}_{nu_str}GHz_RemnAge{age_str}Myr.npz"
+    fname = f"Cl_VV_ellmax{int(PARAMS['ell_max'])}_{nu_str}.npz"
     np.savez(fname, ls=ls, Cl_VV=Cl_VV)
 
     plt.plot(ls, ls*(ls+1)*Cl_VV/(2*np.pi), 'o-', color='crimson', lw=2,) #label=r'Pop III Signal'

@@ -336,7 +336,7 @@ class FaradayModel:
         nu_ratio = self.p['nu_Hz'] / self.c['nu_Hz_ref']      # /1 GHz
         z_term   = ((1 + self.z_arr) / 20.0)**(3/5)
 
-        alpha0_pc = 20.0 * t_ratio**(-12/5) * E_ratio**(4/5) * z_term * fb_ratio * frel_ratio * nu_ratio**(-3) # [pc^-1]
+        alpha0_pc = 2.487001e-15 * t_ratio**(-12/5) * E_ratio**(4/5) * z_term * fb_ratio * frel_ratio * nu_ratio**(-3) # [pc^-1]
         self.alpha0 = alpha0_pc * self.c['Mpc_to_pc']                 # [Mpc^-1], ×1e6
         
     def _init_popIII_properties(self, correction):
@@ -381,7 +381,7 @@ class FaradayModel:
             t_ages = np.geomspace(t_min, t_max, 128)
             alpha_samples = []
             for t_age in t_ages:
-                rs_phys_pc = 2.0 * (self.p['E_sn']/self.c['E_sn_ref'])**(1/5) \
+                rs_phys_pc = 256.261223249 * (self.p['E_sn']/self.c['E_sn_ref'])**(1/5) \
                     * (self.c['ombh2_ref']/0.0245)**(-1/5) \
                     * ((1 + z)/20.0)**(-3/5) \
                     * (t_age/self.c['t_age_ref'])**(2/5)
