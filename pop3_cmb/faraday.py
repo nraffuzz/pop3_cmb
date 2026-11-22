@@ -6,6 +6,7 @@ from .reionization import Reionization
 from typing import Optional
 from scipy.integrate import solve_ivp
 from scipy.interpolate import PchipInterpolator, CubicSpline
+from scipy.optimize import brentq
 
 class FaradayModel:
     def __init__(self, camb_runner, params, constants, k_grid, Plin_grid, freq = 1 * 10**9, Model = 'FlatIMF', M_low = 10, M_high = 100,
@@ -81,7 +82,6 @@ class FaradayModel:
         self.t_grid = self.cr.results.physical_time(self.z_time)
         self.t_of_z = PchipInterpolator(self.z_time, self.t_grid)
         self.z_of_t = PchipInterpolator(self.t_grid[::-1], self.z_time[::-1])
-        self.t_active_yr = 10**7
 
         if correction:
             if ('A' not in self.nuisance or 'B' not in self.nuisance or self.z_re is None or self.Delta_z is None):
@@ -101,6 +101,80 @@ class FaradayModel:
         self._init_halo_properties()
         self._init_popIII_properties(correction)
 
+    def active_time(self, z_obs):  # Returns Gyr
+        t_obs = self.t_of_z(z_obs)
+
+        # params
+        f_b = self.Ob / self.Om
+        Delta_c = 18 * np.pi**2
+        f_He = self.p['f_He']
+        m_p = 1.6726219e-24  # g
+        Msun_g = self.c['M_sun_kg'] * 1e3
+        Mpc_cm = self.c['pc_to_m'] * self.c['Mpc_to_pc'] * 1e2
+
+        rho_crit0 = self.c['rho_crit0_ref'] * self.h**2
+        rho_crit0 *= Msun_g / Mpc_cm**3  # g/cm^3
+
+        E51 = self.p['E_sn'] / 1e51
+
+        def t_rad(z):
+            Ez2 = self.Om * (1 + z)**3 + (1 - self.Om)
+            rho_crit_z = rho_crit0 * Ez2
+            rho_1 = f_b * Delta_c * rho_crit_z
+            n_1 = rho_1 / ((1 + 4*f_He) * m_p)
+            return 4.9e4 * E51**0.22 * n_1**(-0.55) / 1e9  # Gyr
+
+        # Solve for explosion redshift
+        def equation(z_SN):
+            return t_obs - self.t_of_z(z_SN) - t_rad(z_SN)
+
+        z_max = self.z_time[-1]
+        if equation(z_max) <= 0:
+            raise ValueError("No explosion redshift within the time grid.")
+        
+        z_SN = brentq(equation, z_obs, z_max)
+        return t_obs - self.t_of_z(z_SN)
+    
+    def sedov_time(self, M_avg):  # Returns Gyr
+        f_b = self.Ob / self.Om
+        Delta_c = 18 * np.pi**2
+
+        Msun_g = self.c['M_sun_kg'] * 1e3
+        Mpc_cm = self.c['pc_to_m'] * self.c['Mpc_to_pc'] * 1e2
+
+        M_ej = M_avg * Msun_g
+        E_SN = self.p['E_sn']
+
+        rho_crit0 = self.c['rho_crit0_ref'] * self.h**2
+        rho_crit0 *= Msun_g / Mpc_cm**3
+
+        v_ej = np.sqrt(2 * E_SN / M_ej)
+
+        def t_ST(z):
+            Ez2 = self.Om * (1 + z)**3 + (1 - self.Om)
+            rho_1 = f_b * Delta_c * rho_crit0 * Ez2
+
+            R_ST = (3 * M_ej / (4 * np.pi * rho_1))**(1/3)
+
+            return R_ST / v_ej / (365.25 * 24 * 3600 * 1e9)
+
+        t_ST_arr = np.zeros_like(self.z_arr, dtype=float)
+        z_max = self.z_time[-1]
+
+        for i, z_obs in enumerate(self.z_arr):
+            t_obs = self.t_of_z(z_obs)
+
+            def equation(z_SN):
+                return t_obs - self.t_of_z(z_SN) - t_ST(z_SN)
+
+            if equation(z_max) <= 0:
+                raise ValueError(f"No valid explosion redshift for z={z_obs}")
+
+            z_SN = brentq(equation, z_obs, z_max)
+            t_ST_arr[i] = t_obs - self.t_of_z(z_SN)
+
+        return t_ST_arr
+    
     def _M_thr(self, z):
         """Eq. (25): threshold halo mass for T_vir = 1e4 K atomic cooling."""
         Tvir = 1.0e4
@@ -214,11 +288,11 @@ class FaradayModel:
         self.EPS_solutions = []
 
         tau_max = self.tau_star(self.p['M_sn_min'])      # Gyr
-        t_active_Gyr = self.t_active_yr / 1e9               # Gyr
 
         for z_obs in self.z_arr:
 
             t_obs = self.t_of_z(z_obs)
+            t_active_Gyr = self.active_time(z_obs)
 
             z_needed = self.z_of_t(
                 t_obs - tau_max - t_active_Gyr
@@ -235,18 +309,17 @@ class FaradayModel:
 
             self.EPS_solutions.append(sol)
 
-    def _Mh_active_bracket(self, i, m, t_active_yr): # i is redshift index; m is star mass
+    def _Mh_active_bracket(self, i, m, t_active_Gyr): # i is redshift index; m is star mass
         """
         Suppression factor for all halo masses in self.M_grid for a given observation redshift and stellar mass.
         """
 
-        dynamicalGamma_Gyr = t_active_yr / 1e9
         tau = self.tau_star(m)
 
         z_obs = self.z_arr[i]
         t_obs = self.t_of_z(z_obs)
         z_recent = self.z_of_t(t_obs - tau)
-        z_early  = self.z_of_t(t_obs - tau - dynamicalGamma_Gyr)
+        z_early  = self.z_of_t(t_obs - tau - t_active_Gyr)
 
         sol = self.EPS_solutions[i] # solution for halo grid observed at z_obs
 
@@ -266,7 +339,6 @@ class FaradayModel:
         alpha0_pc = 20.0 * t_ratio**(-12/5) * E_ratio**(4/5) * z_term * fb_ratio * frel_ratio * nu_ratio**(-3) # [pc^-1]
         self.alpha0 = alpha0_pc * self.c['Mpc_to_pc']                 # [Mpc^-1], ×1e6
         
-
     def _init_popIII_properties(self, correction):
         """
         Compute Pop III star formation properties: number of SNe per halo N_sn and Faraday Conversion rate alpha0 on the grid defined by z_arr and M_grid.
@@ -278,7 +350,8 @@ class FaradayModel:
         self.N_sn = np.zeros((self.nz, len(self.M_grid)))
 
         for i in range(self.nz):
-            self.N_sn[i,:] = IMF(self.IMF, lambda m: self._Mh_active_bracket(i, m, self.t_active_yr), self.p['epsilon_star'], f_b, M_sn_max, M_sn_min, self.M_low, self.M_high, self.gamma, self.alpha, self.beta, self.Mch, self.sigma)
+            t_active_Gyr = self.active_time(self.z_arr[i])
+            self.N_sn[i,:] = IMF(self.IMF, lambda m: self._Mh_active_bracket(i, m, t_active_Gyr), self.p['epsilon_star'], f_b, M_sn_max, M_sn_min, self.M_low, self.M_high, self.gamma, self.alpha, self.beta, self.Mch, self.sigma)
 
         if correction:
             if self.nuisance == {} or self.z_re == None or self.Delta_z == None: 
@@ -288,7 +361,7 @@ class FaradayModel:
 
         self._alpha0()
     
-    def compute_P_alpha(self, return_components=False):
+    def compute_P_alpha(self, M_avg = 21.64, return_components=False):
         """
         Compute Faraday Conv. power spectrum P_alpha(k, z) using the halo model.
         Returns P1h + P2h on the (z_arr, k) grid.
@@ -296,39 +369,66 @@ class FaradayModel:
         P1h = np.zeros((self.nz, len(self.k)))
         P2h = np.zeros((self.nz, len(self.k)))
         dM  = np.gradient(np.log(self.M_grid))
-        
+
+        t_ST = self.sedov_time(M_avg) * 1e9
+        t_rad = np.array([self.active_time(z) for z in self.z_arr]) * 1e9
 
         for i in range(self.nz):
             z = self.z_arr[i]
-            rs_phys_pc = 2.0 * (self.p['E_sn']/self.c['E_sn_ref'])**(1/5) \
-                * (self.c['ombh2_ref']/0.0245)**(-1/5) \
-                * ((1 + z)/20.0)**(-3/5) \
-                * (self.p['t_age']/self.c['t_age_ref'])**(2/5)
+            t_min = t_ST[i]
+            t_max = t_rad[i]
 
-            rs_phys_Mpc = rs_phys_pc * 1e-6
-            rp_phys_Mpc = rs_phys_Mpc * (self.p['eta']/(self.p['eta']-1))**(-1/3)
-            V_rem_phys  = (4*np.pi/3) * (rs_phys_Mpc**3 - rp_phys_Mpc**3)   # proper Mpc^3
+            t_ages = np.geomspace(t_min, t_max, 128)
+            alpha_samples = []
+            for t_age in t_ages:
+                rs_phys_pc = 2.0 * (self.p['E_sn']/self.c['E_sn_ref'])**(1/5) \
+                    * (self.c['ombh2_ref']/0.0245)**(-1/5) \
+                    * ((1 + z)/20.0)**(-3/5) \
+                    * (t_age/self.c['t_age_ref'])**(2/5)
 
-            u_sn = get_SN_profile_k(self.k * (1 + z), rs_phys_Mpc, self.p['eta'])  # dimensionless (converted k back to physical)
-            alpha_tilde_phys = self.alpha0[i] * V_rem_phys * u_sn # proper Mpc^2
-            alpha_tilde = alpha_tilde_phys * (1 + z)**2          # -> comoving Mpc^2
+                rs_phys_Mpc = rs_phys_pc * 1e-6
+                rp_phys_Mpc = rs_phys_Mpc * (self.p['eta']/(self.p['eta']-1))**(-1/3)
+                V_rem_phys  = (4*np.pi/3) * (rs_phys_Mpc**3 - rp_phys_Mpc**3)   # proper Mpc^3
+
+                u_sn = get_SN_profile_k(self.k * (1 + z), rs_phys_Mpc, self.p['eta'])  # dimensionless (converted k back to physical)
+                alpha0_t = self.alpha0[i] * (t_age / self.p['t_age'])**(-12/5)
+                alpha_tilde_phys = alpha0_t * V_rem_phys * u_sn
+                alpha_samples.append(alpha_tilde_phys)
+
+            alpha_samples = np.asarray(alpha_samples)
+            alpha_tilde_avg = np.trapezoid(
+                alpha_samples,
+                x=t_ages,
+                axis=0
+            ) / (t_max - t_min)
+
+            alpha_tilde_sq = np.trapezoid(
+                alpha_samples**2,
+                x=t_ages,
+                axis=0
+            ) / (t_max - t_min)
+
+            alpha_tilde_sq *= (1 + z)**4
+            alpha_tilde = alpha_tilde_avg * (1 + z)**2          # -> comoving Mpc^2
 
             M_thr = self._M_thr(z)
             mask  = self.M_grid >= M_thr
             
-            bracket_1 = np.zeros_like(self.k) # Mpc⁻³
+            bracket_self = np.zeros_like(self.k) # Mpc⁻³
+            bracket_pairs = np.zeros_like(self.k) # Mpc⁻³
             bracket_2 = np.zeros_like(self.k) # Mpc⁻³
-            
+
             for j in range(len(self.M_grid)):
                 if not mask[j]:                   # skip sub-threshold halos
                     continue
+                N = self.N_sn[i,j]
                 u_halo = get_halo_profile_k(self.k, self.Rvir[i,j], 10.0)
-                bracket_1 += self.dndM[i,j] * (
-                    self.N_sn[i,j] + self.N_sn[i,j]*(self.N_sn[i,j]-1)*u_halo**2
-                    ) * dM[j]
-                bracket_2 += self.dndM[i,j] * self.bias[i,j] * self.N_sn[i,j] * dM[j]
 
-            P1h[i, :] = alpha_tilde**2 * bracket_1 # alpha_tilde² · bracket_1 = Mpc⁴ · Mpc⁻³ = Mpc
+                bracket_self += self.dndM[i,j] * N * dM[j]
+                bracket_pairs += self.dndM[i,j] * N**2 * u_halo**2 * dM[j] # see overleaf Poisson distrabution around N (mean)
+                bracket_2 += self.dndM[i,j] * self.bias[i,j] * N * dM[j]
+
+            P1h[i, :] = alpha_tilde_sq * bracket_self + alpha_tilde**2 * bracket_pairs # Mpc⁴ · Mpc⁻³ = Mpc
             P2h[i, :] = alpha_tilde**2 * self.Plin[i, :] * bracket_2**2 # alpha_tilde² · Plin · bracket_2² = Mpc⁴ · Mpc³ · Mpc⁻⁶ = Mpc
 
         if return_components:
