@@ -67,8 +67,25 @@ class Reionization:
             predicted_Delta_z = term_low - term_high
             return predicted_Delta_z - self.Delta_z
 
-        delta_z = brentq(equation, 1e-6, 5) # may need to be changed if range not big enough in sampling
-        self.delta_z = delta_z
+        if not np.isfinite(self.z_re) or self.z_re <= -1:
+            raise ValueError("z_re must be finite and greater than -1.")
+
+        if not np.isfinite(self.Delta_z) or self.Delta_z <= 0:
+            raise ValueError("Delta_z must be finite and positive.")
+
+        # Keep the base inside term_high positive.
+        upper = (
+            2 * (1 + self.z_re)
+            / (3 * np.arctanh(2 * self.Q_high - 1))
+        ) * (1 - 1e-12)
+
+        if equation(upper) < 0:
+            raise ValueError(
+                "Requested Delta_z is too large for this tanh parametrization "
+                "at the chosen z_re."
+            )
+
+        self.delta_z = brentq(equation, 0.0, upper)
 
     def firstReionFrac(self, filling_factor: bool = True, z = None) -> np.ndarray:
         """
